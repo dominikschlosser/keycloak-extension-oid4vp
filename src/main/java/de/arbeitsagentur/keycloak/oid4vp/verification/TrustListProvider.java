@@ -32,7 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jboss.logging.Logger;
-import org.keycloak.broker.provider.util.SimpleHttp;
+import org.keycloak.http.simple.SimpleHttp;
 import org.keycloak.models.KeycloakSession;
 
 /**
@@ -225,7 +225,8 @@ public class TrustListProvider {
 
     private String fetchTrustListJwt() throws Exception {
         if (session != null) {
-            return SimpleHttp.doGet(trustListUrl, session)
+            return SimpleHttp.create(session)
+                    .doGet(trustListUrl)
                     .header("Accept", "application/jwt")
                     .asString();
         }

@@ -24,11 +24,17 @@ import org.keycloak.models.SingleUseObjectProvider;
 import org.keycloak.utils.StringUtil;
 
 /**
- * Stores three types of session lookup indexes in Keycloak's {@link SingleUseObjectProvider}:
+ * Stores session lookup indexes in Keycloak's {@link SingleUseObjectProvider}.
  *
+ * <p>Follows the Pushed Authorization Request (PAR) storage pattern used by Keycloak's built-in
+ * {@code ParEndpoint}: request URIs use the {@code urn:ietf:params:oauth:request_uri:} prefix
+ * (RFC 9126 §2.2) and are stored as single-use objects with a configurable TTL.
+ *
+ * <p>Three index types are maintained:
  * <ul>
- *   <li><b>Request handle → session</b>: Maps a random UUID (used in the request_uri path) to the
- *       authentication session. Validated when the wallet fetches the request object on demand.
+ *   <li><b>Request URI → session</b>: Maps a request handle UUID (embedded in the
+ *       {@code request_uri} path) to the authentication session. Unlike standard PAR (which is
+ *       single-use), OID4VP request URIs can be fetched multiple times by the wallet.
  *   <li><b>State → session</b>: Maps the OAuth state parameter to the authentication session.
  *       Used to recover the session in cross-device and direct_post flows where no session cookie
  *       is available.
@@ -38,11 +44,19 @@ import org.keycloak.utils.StringUtil;
  * </ul>
  *
  * <p>All entries expire after the configured TTL (typically the Keycloak login timeout).
+ *
+ * @see <a href="https://www.rfc-editor.org/rfc/rfc9126#section-2.2">RFC 9126 §2.2 — Pushed Authorization Request Response</a>
  */
 public class Oid4vpRequestObjectStore {
 
     private static final Logger LOG = Logger.getLogger(Oid4vpRequestObjectStore.class);
-    private static final String REQUEST_HANDLE_PREFIX = "oid4vp_request_handle:";
+
+    /**
+     * Prefix for request URI storage keys, aligned with PAR convention (RFC 9126 §2.2).
+     * Unlike PAR's single-use semantics, OID4VP request URIs support multiple fetches.
+     */
+    static final String REQUEST_URI_PREFIX = "urn:ietf:params:oauth:request_uri:";
+
     private static final String STATE_INDEX_PREFIX = "oid4vp_state:";
     private static final String KID_INDEX_PREFIX = "oid4vp_kid:";
 
@@ -63,7 +77,7 @@ public class Oid4vpRequestObjectStore {
         long lifespanSeconds = ttl.toSeconds();
         session.singleUseObjects()
                 .put(
-                        REQUEST_HANDLE_PREFIX + requestHandle,
+                        REQUEST_URI_PREFIX + requestHandle,
                         lifespanSeconds,
                         Map.of("rootSessionId", rootSessionId, "tabId", tabId));
         LOG.debugf("Stored request handle: handle=%s, rootSessionId=%s", requestHandle, rootSessionId);
@@ -91,7 +105,7 @@ public class Oid4vpRequestObjectStore {
 
     public RequestHandleEntry resolveRequestHandle(KeycloakSession session, String requestHandle) {
         if (StringUtil.isBlank(requestHandle)) return null;
-        Map<String, String> entry = session.singleUseObjects().get(REQUEST_HANDLE_PREFIX + requestHandle);
+        Map<String, String> entry = session.singleUseObjects().get(REQUEST_URI_PREFIX + requestHandle);
         if (entry == null) return null;
         return new RequestHandleEntry(entry.get("rootSessionId"), entry.get("tabId"));
     }

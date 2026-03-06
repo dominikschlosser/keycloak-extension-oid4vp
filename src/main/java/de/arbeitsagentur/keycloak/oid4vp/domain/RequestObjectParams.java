@@ -24,12 +24,13 @@ package de.arbeitsagentur.keycloak.oid4vp.domain;
  * that nonce, timestamps, and encryption keys are never reused.
  *
  * @see <a href="https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#section-5">OID4VP 1.0 §5 — Authorization Request</a>
+ * @see <a href="https://www.rfc-editor.org/rfc/rfc9101">RFC 9101 — JWT-Secured Authorization Request (JAR)</a>
  */
 public record RequestObjectParams(
         String dcqlQuery,
         String verifierInfo,
         String clientId,
-        String clientIdScheme,
+        ClientIdScheme clientIdScheme,
         String responseUri,
         String state,
         String nonce,

@@ -32,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.Inflater;
 import java.util.zip.InflaterInputStream;
 import org.jboss.logging.Logger;
-import org.keycloak.broker.provider.util.SimpleHttp;
+import org.keycloak.http.simple.SimpleHttp;
 import org.keycloak.models.KeycloakSession;
 
 /**
@@ -239,7 +239,8 @@ public class StatusListVerifier {
 
     private String fetchStatusListJwt(String uri) throws Exception {
         if (session != null) {
-            return SimpleHttp.doGet(uri, session)
+            return SimpleHttp.create(session)
+                    .doGet(uri)
                     .header("Accept", "application/statuslist+jwt")
                     .asString();
         }

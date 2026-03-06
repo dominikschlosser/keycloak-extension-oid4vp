@@ -15,6 +15,7 @@
  */
 package de.arbeitsagentur.keycloak.oid4vp;
 
+import de.arbeitsagentur.keycloak.oid4vp.domain.ClientIdScheme;
 import de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpConfigProvider;
 import de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpConstants;
 import java.time.Duration;
@@ -162,6 +163,11 @@ public class Oid4vpIdentityProviderConfig extends IdentityProviderModel implemen
 
     public void setClientIdScheme(String scheme) {
         getConfig().put(CLIENT_ID_SCHEME, scheme);
+    }
+
+    /** Returns the resolved {@link ClientIdScheme} taking HAIP enforcement into account. */
+    public ClientIdScheme resolveClientIdScheme() {
+        return ClientIdScheme.of(getClientIdScheme());
     }
 
     public String getX509CertificatePem() {

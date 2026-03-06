@@ -23,6 +23,7 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jose.util.Base64;
 import com.nimbusds.jwt.SignedJWT;
+import de.arbeitsagentur.keycloak.oid4vp.domain.ClientIdScheme;
 import de.arbeitsagentur.keycloak.oid4vp.domain.RequestObjectParams;
 import de.arbeitsagentur.keycloak.oid4vp.domain.SignedRequestObject;
 import java.math.BigInteger;
@@ -221,7 +222,7 @@ class Oid4vpRedirectFlowServiceHaipTest {
                 "{\"credentials\":[{\"id\":\"test\",\"format\":\"dc+sd-jwt\",\"meta\":{\"vct_values\":[\"IdentityCredential\"]},\"claims\":[{\"path\":[\"sub\"]}]}]}",
                 null,
                 "test-client-id",
-                "x509_hash",
+                ClientIdScheme.of("x509_hash"),
                 "https://example.com/callback",
                 "test-state",
                 "test-nonce",

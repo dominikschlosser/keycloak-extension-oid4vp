@@ -32,16 +32,14 @@ import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jose.produce.JWSSignerFactory;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import de.arbeitsagentur.keycloak.oid4vp.domain.ClientIdScheme;
 import de.arbeitsagentur.keycloak.oid4vp.domain.RequestObjectParams;
 import de.arbeitsagentur.keycloak.oid4vp.domain.SignedRequestObject;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
-import java.util.Base64;
-import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -202,7 +200,7 @@ public class Oid4vpRedirectFlowService {
 
     private String signClaims(
             ResolvedSigningKey resolved,
-            String clientIdScheme,
+            ClientIdScheme clientIdScheme,
             String x509CertPem,
             LinkedHashMap<String, Object> claims) {
         try {
@@ -213,48 +211,6 @@ public class Oid4vpRedirectFlowService {
         } catch (Exception e) {
             throw new IllegalStateException("Failed to sign request object", e);
         }
-    }
-
-    /** Computes a {@code x509_san_dns:<dns-name>} client ID from the certificate's SAN DNS entry. */
-    public String computeX509SanDnsClientId(String pemCertificate) {
-        try {
-            X509Certificate cert = decodeFirstCertificate(pemCertificate);
-            Collection<List<?>> sans = cert.getSubjectAlternativeNames();
-            if (sans != null) {
-                for (List<?> san : sans) {
-                    if (san.size() >= 2 && Integer.valueOf(2).equals(san.get(0))) {
-                        return CLIENT_ID_SCHEME_X509_SAN_DNS + ":" + san.get(1);
-                    }
-                }
-            }
-            throw new IllegalStateException("No DNS SAN found in certificate");
-        } catch (IllegalStateException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to extract DNS SAN from certificate", e);
-        }
-    }
-
-    /** Computes a {@code x509_hash:<base64url-sha256>} client ID from the certificate's DER encoding. */
-    public String computeX509HashClientId(String pemCertificate) {
-        try {
-            X509Certificate cert = decodeFirstCertificate(pemCertificate);
-            byte[] encoded = cert.getEncoded();
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(encoded);
-            String hashBase64 = Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
-            return CLIENT_ID_SCHEME_X509_HASH + ":" + hashBase64;
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to compute certificate hash", e);
-        }
-    }
-
-    private X509Certificate decodeFirstCertificate(String pem) {
-        X509Certificate[] certs = PemUtils.decodeCertificates(pem);
-        if (certs == null || certs.length == 0) {
-            throw new IllegalStateException("No certificates found in PEM");
-        }
-        return certs[0];
     }
 
     private String signWithNimbus(com.nimbusds.jose.jwk.JWK signingKey, LinkedHashMap<String, Object> claims)
@@ -302,19 +258,21 @@ public class Oid4vpRedirectFlowService {
     }
 
     private String signWithKeycloak(
-            KeyWrapper signingKey, String clientIdScheme, String x509CertPem, LinkedHashMap<String, Object> claims)
+            KeyWrapper signingKey,
+            ClientIdScheme clientIdScheme,
+            String x509CertPem,
+            LinkedHashMap<String, Object> claims)
             throws Exception {
         JWSBuilder builder = new JWSBuilder().type(REQUEST_OBJECT_TYP).kid(signingKey.getKid());
 
         if (signingKey.getCertificateChain() != null
                 && !signingKey.getCertificateChain().isEmpty()) {
             builder = builder.x5c(signingKey.getCertificateChain());
-        } else if ((CLIENT_ID_SCHEME_X509_SAN_DNS.equals(clientIdScheme)
-                        || CLIENT_ID_SCHEME_X509_HASH.equals(clientIdScheme))
-                && x509CertPem != null
-                && !x509CertPem.isBlank()) {
-            X509Certificate cert = decodeFirstCertificate(x509CertPem);
-            builder = builder.x5c(List.of(cert));
+        } else if (clientIdScheme.requiresX5cHeader() && x509CertPem != null && !x509CertPem.isBlank()) {
+            X509Certificate[] certs = PemUtils.decodeCertificates(x509CertPem);
+            if (certs != null && certs.length > 0) {
+                builder = builder.x5c(List.of(certs));
+            }
         } else if (signingKey.getPublicKey() != null) {
             builder = builder.jwk(toPublicJwk(signingKey));
         }

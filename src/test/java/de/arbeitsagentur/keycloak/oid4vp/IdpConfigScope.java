@@ -20,6 +20,8 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
+import org.keycloak.admin.client.Keycloak;
+import org.keycloak.representations.idm.IdentityProviderRepresentation;
 
 /**
  * JUnit extension that tracks IdP config changes and restores them after each test.
@@ -40,12 +42,12 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  */
 class IdpConfigScope implements AfterEachCallback {
 
-    private final Supplier<KeycloakAdminClient> adminSupplier;
+    private final Supplier<Keycloak> adminSupplier;
     private final String realm;
     private final Map<String, String> pending = new LinkedHashMap<>();
     private final Map<String, String> originals = new LinkedHashMap<>();
 
-    IdpConfigScope(Supplier<KeycloakAdminClient> adminSupplier, String realm) {
+    IdpConfigScope(Supplier<Keycloak> adminSupplier, String realm) {
         this.adminSupplier = adminSupplier;
         this.realm = realm;
     }
@@ -57,14 +59,14 @@ class IdpConfigScope implements AfterEachCallback {
     }
 
     /** Send all buffered changes to Keycloak in a single admin API PUT. */
-    @SuppressWarnings("unchecked")
-    void apply() throws Exception {
+    void apply() {
         if (pending.isEmpty()) {
             return;
         }
-        KeycloakAdminClient admin = adminSupplier.get();
-        Map<String, Object> idp = admin.getJson("/admin/realms/" + realm + "/identity-provider/instances/oid4vp");
-        Map<String, String> config = (Map<String, String>) idp.get("config");
+        Keycloak admin = adminSupplier.get();
+        IdentityProviderRepresentation rep =
+                admin.realm(realm).identityProviders().get("oid4vp").toRepresentation();
+        Map<String, String> config = rep.getConfig();
         for (String key : pending.keySet()) {
             if (!originals.containsKey(key)) {
                 originals.put(key, config.getOrDefault(key, ""));
@@ -75,7 +77,7 @@ class IdpConfigScope implements AfterEachCallback {
     }
 
     @Override
-    public void afterEach(ExtensionContext context) throws Exception {
+    public void afterEach(ExtensionContext context) {
         pending.clear();
         if (originals.isEmpty()) {
             return;

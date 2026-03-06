@@ -18,6 +18,7 @@ package de.arbeitsagentur.keycloak.oid4vp;
 import static de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpConstants.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import de.arbeitsagentur.keycloak.oid4vp.domain.ClientIdScheme;
 import de.arbeitsagentur.keycloak.oid4vp.domain.CredentialTypeSpec;
 import de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpConstants;
 import de.arbeitsagentur.keycloak.oid4vp.service.Oid4vpCallbackProcessor;
@@ -275,16 +276,8 @@ public class Oid4vpIdentityProvider extends AbstractIdentityProvider<Oid4vpIdent
     }
 
     private String computeEffectiveClientId(String clientId) {
-        String clientIdScheme = getConfig().getClientIdScheme();
-        String x509Pem = getConfig().getX509CertificatePem();
-        if (Oid4vpConstants.CLIENT_ID_SCHEME_X509_SAN_DNS.equalsIgnoreCase(clientIdScheme)
-                && StringUtil.isNotBlank(x509Pem)) {
-            return redirectFlowService.computeX509SanDnsClientId(x509Pem);
-        } else if (Oid4vpConstants.CLIENT_ID_SCHEME_X509_HASH.equalsIgnoreCase(clientIdScheme)
-                && StringUtil.isNotBlank(x509Pem)) {
-            return redirectFlowService.computeX509HashClientId(x509Pem);
-        }
-        return clientId;
+        ClientIdScheme scheme = getConfig().resolveClientIdScheme();
+        return scheme.resolveClientId(clientId, getConfig().getX509CertificatePem());
     }
 
     private String buildCrossDeviceStatusUrl() {

@@ -181,6 +181,13 @@
       <scope>test</scope>
     </dependency>
 
+    <!-- Keycloak admin client for integration tests -->
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-admin-client</artifactId>
+      <scope>test</scope>
+    </dependency>
+
     <!-- Keycloak crypto provider for unit tests (JwkParsingUtils needs CryptoIntegration) -->
     <dependency>
       <groupId>org.keycloak</groupId>
@@ -374,6 +381,10 @@
           <includes>
             <include>**/*IT.java</include>
           </includes>
+          <!-- CredentialRevocationIT must run after other ITs so the wallet container's
+               async status list regeneration has completed. Reverse-alphabetical ensures
+               C(redentialRevocation) runs after S(ameDevice), R(equestObject), C(rossDevice). -->
+          <runOrder>reversealphabetical</runOrder>
         </configuration>
         <executions>
           <execution>

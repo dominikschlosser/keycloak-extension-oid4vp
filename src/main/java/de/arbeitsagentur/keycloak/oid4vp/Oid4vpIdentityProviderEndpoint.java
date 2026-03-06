@@ -307,7 +307,7 @@ public class Oid4vpIdentityProviderEndpoint {
                             dcqlQuery,
                             config.getVerifierInfo(),
                             effectiveClientId,
-                            config.getClientIdScheme(),
+                            config.resolveClientIdScheme(),
                             responseUri,
                             state,
                             nonce,
