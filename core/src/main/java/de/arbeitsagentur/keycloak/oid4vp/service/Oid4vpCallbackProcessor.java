@@ -355,7 +355,7 @@ public class Oid4vpCallbackProcessor {
      * Validates that the presented credentials satisfy one complete option of every required
      * credential set. Only credentials that passed their own claim validation qualify, so one that
      * withheld requested claims cannot satisfy an option. Without credential sets every requested
-     * credential is required (OID4VP 1.0, section 6.1), which stops a wallet from silently omitting
+     * credential is required (OID4VP 1.0 section 6.4.2), which stops a wallet from silently omitting
      * credentials whose claims the mappers depend on.
      */
     private void enforceCredentialSets(

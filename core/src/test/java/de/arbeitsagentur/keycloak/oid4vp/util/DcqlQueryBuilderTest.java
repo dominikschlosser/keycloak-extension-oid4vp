@@ -589,7 +589,7 @@ class DcqlQueryBuilderTest {
         assertThat(credentialSets.get(0).get("options")).isEqualTo(List.of(List.of("pid", "mdl"), List.of("pid")));
         assertThat(credentialSets.get(0).get("purpose")).isEqualTo("Login");
         assertThat(credentialSets.get(0))
-                .as("required defaults to true in DCQL, so it is only written when false")
+                .as("OID4VP 1.0 section 6.2 defaults required to true, so it is only written when false")
                 .doesNotContainKey("required");
     }
 

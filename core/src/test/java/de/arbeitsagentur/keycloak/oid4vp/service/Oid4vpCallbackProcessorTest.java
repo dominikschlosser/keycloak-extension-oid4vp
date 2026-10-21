@@ -230,9 +230,8 @@ class Oid4vpCallbackProcessorTest {
 
     @Test
     void process_mdocSubjectIsNotTakenFromANamespaceTheQueryDidNotAskFor() {
-        // The elements of an mDoc are issuer signed, so which namespace they live in is not the
-        // verifier's choice. Reading the subject out of any namespace that happens to carry it would
-        // let a credential answer with an identity out of a namespace this verifier never asked for.
+        // Reading the subject out of any namespace that happens to carry it would let a credential
+        // answer with an identity out of a namespace this verifier never asked for.
         config.setPrincipalAttributes("cred-1:sub");
         VerifiedCredential mdoc = new VerifiedCredential(
                 "cred-1",
@@ -292,7 +291,7 @@ class Oid4vpCallbackProcessorTest {
                 .hasMessageContaining("given_name");
     }
 
-    // Without credential_sets every requested credential is required (OID4VP 1.0, section 6.1).
+    // Without credential_sets every requested credential is required (OID4VP 1.0 section 6.4.2).
     @Test
     void process_rejectsPresentationOmittingARequestedCredential() {
         Oid4vpCallbackProcessor processor = processor(resultOf(sdJwtCredential(Map.of("sub", "user1"))));

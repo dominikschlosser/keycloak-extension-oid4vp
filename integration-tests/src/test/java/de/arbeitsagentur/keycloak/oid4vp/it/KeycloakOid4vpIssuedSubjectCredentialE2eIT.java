@@ -69,9 +69,9 @@ import org.keycloak.testframework.annotations.KeycloakIntegrationTest;
  * This Keycloak issues the subject credential itself, so the first presentation arrives without it.
  *
  * <p>The wallet holds the PID alone, which identifies nobody, so the user signs in with a password
- * and the login is bound to that account. The credential offer then issues the employee credential
- * carrying a subject derived for that account and the reference credential binding of the PID it was
- * issued alongside, and the next presentation reaches the same account without a password.
+ * and the login is bound to that account. The credential offer then issues the employee credential.
+ * It carries a subject derived for that account and the reference credential binding of the PID it
+ * was issued alongside. The next presentation reaches the same account without a password.
  */
 @KeycloakIntegrationTest(config = Oid4vpServerConfig.class)
 class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
@@ -170,8 +170,8 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
 
     /**
      * The credential this Keycloak issues identifies an account on its own, so it must not sign in
-     * next to the PID of somebody else, which is what a wallet holding the credentials of two people
-     * would do without the reference credential binding.
+     * next to the PID of somebody else. Without the reference credential binding, a wallet holding
+     * the credentials of two people could do exactly that.
      */
     @Test
     void theIssuedCredentialDoesNotSignInNextToThePidOfSomebodyElse() throws Exception {
@@ -306,7 +306,7 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
         addUser();
     }
 
-    /** The OID4VC protocol is refused for a realm that does not have verifiable credentials enabled. */
+    // The OID4VC protocol is refused for a realm that does not have verifiable credentials enabled.
     private void enableVerifiableCredentials() {
         RealmRepresentation realmRepresentation = realm.admin().toRepresentation();
         if (Boolean.TRUE.equals(realmRepresentation.isVerifiableCredentialsEnabled())) {
@@ -467,8 +467,8 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
     }
 
     /**
-     * The PID matches no account and the default flow would create a user, so this flow asks the user
-     * to sign in and binds the login to that account instead.
+     * The PID matches no account and the default flow would create a user. This flow asks the user to
+     * sign in and binds the login to that account.
      */
     private void addFirstBrokerLoginFlow() {
         boolean exists = realm.admin().flows().getFlows().stream()
@@ -533,7 +533,7 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
                 "realm issuer trust provider", realm.admin().identityProviders().create(trustIdp));
     }
 
-    /** Puts the response body into the failure message, since a bare status code does not say what was refused. */
+    // A bare status code does not say what was refused, so the failure message carries the response body.
     private static void assertCreated(String what, Response response) {
         try (response) {
             String body = response.hasEntity() ? response.readEntity(String.class) : "";

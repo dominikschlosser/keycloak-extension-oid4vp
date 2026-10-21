@@ -158,8 +158,8 @@ public class Oid4vpBoundSubjectMapper extends OID4VCMapper {
 
     @Override
     public String getHelpText() {
-        return "Writes the subject an OID4VP login was bound to, and the reference credential binding of that login, into the "
-                + "credential. Use it on the credential scope the 'oid4vp-subject-binding' authenticator offers.";
+        return "Writes the subject and the reference credential binding of an OID4VP login into the credential. "
+                + "Add it to the credential scope the 'oid4vp-subject-binding' authenticator offers.";
     }
 
     @Override
