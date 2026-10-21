@@ -86,6 +86,9 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
     private static final String FIRST_BROKER_LOGIN_FLOW = "oid4vp first broker login";
     private static final String REALM_ISSUER_TRUST_ALIAS = "keycloak-realm-issuer";
     private static final String KEY_PROVIDER_NAME = "oid4vp-issuer-signing-key";
+    // A name other than the default proves that the mapper and the identity provider both follow
+    // their setting.
+    private static final String REFERENCE_BINDING_CLAIM = "employee_binding";
 
     @InjectTestWallet(config = VciTestWalletConfig.class)
     TestWallet wallet;
@@ -115,7 +118,7 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
                 .isNotEqualTo(userId());
         assertThat(issued.claims())
                 .as("the credential says which presentation it was issued for")
-                .containsKey("oid4vp_reference_binding");
+                .containsKey(REFERENCE_BINDING_CLAIM);
 
         testApp().reset();
         flow.clearBrowserSession();
@@ -177,7 +180,7 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
         firstPidOnlyLogin();
         assertThat(issuedCredential().claims())
                 .as("the credential says which presentation it was issued for")
-                .containsKey("oid4vp_reference_binding");
+                .containsKey(REFERENCE_BINDING_CLAIM);
 
         // The wallet keeps the issued credential but now holds the PID of another person.
         wallet().client().deleteCredentialsByType(Oid4vpTestKeycloakSetup.SD_JWT_PID_VCT);
@@ -358,7 +361,7 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
         subjectId.setName("employee-subject-id");
         subjectId.setProtocol("oid4vc");
         subjectId.setProtocolMapper("oid4vp-bound-subject-mapper");
-        subjectId.setConfig(Map.of("claim.name", "sub"));
+        subjectId.setConfig(Map.of("claim.name", "sub", "referenceBindingClaim", REFERENCE_BINDING_CLAIM));
 
         ClientScopeRepresentation scope = new ClientScopeRepresentation();
         scope.setName(CREDENTIAL_SCOPE);
@@ -379,7 +382,7 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
         // must not be hidden behind selective disclosure. This setting replaces the default list,
         // which is why the claims Keycloak keeps visible by default are repeated here.
         attributes.put(
-                "vc.credential_build_config.sd_jwt.visible_claims", "id,iat,nbf,exp,jti,oid4vp_reference_binding");
+                "vc.credential_build_config.sd_jwt.visible_claims", "id,iat,nbf,exp,jti," + REFERENCE_BINDING_CLAIM);
         attributes.put("vc.expiry_in_seconds", "31536000");
         attributes.put("include.in.token.scope", "true");
         scope.setAttributes(attributes);
@@ -454,6 +457,8 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
                 EMPLOYEE_CREDENTIAL_ID + ":sub",
                 Oid4vpIdentityProviderConfig.ALLOW_MISSING_SUBJECT_CREDENTIAL,
                 "true",
+                Oid4vpIdentityProviderConfig.REFERENCE_BINDING_CLAIM,
+                REFERENCE_BINDING_CLAIM,
                 Oid4vpIdentityProviderConfig.TRUST_MATERIAL_IDPS,
                 Oid4vpTestKeycloakSetup.TRUST_IDP_ALIAS + "," + REALM_ISSUER_TRUST_ALIAS));
 

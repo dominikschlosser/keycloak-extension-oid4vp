@@ -19,7 +19,6 @@ import static de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpConstants.*;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import de.arbeitsagentur.keycloak.oid4vp.binding.ReferenceBindingCheck;
-import de.arbeitsagentur.keycloak.oid4vp.binding.ReferenceCredentialBinding;
 import de.arbeitsagentur.keycloak.oid4vp.domain.CredentialSet;
 import de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpConfigProvider;
 import de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpPresentationFlow;
@@ -268,7 +267,7 @@ public class Oid4vpCallbackProcessor {
      */
     private boolean boundToThisPresentation(
             VpTokenResult vpResult, String credentialId, VerifiedCredential credential) {
-        Object claimed = credential.claims().get(ReferenceCredentialBinding.REFERENCE_BINDING_CLAIM);
+        Object claimed = credential.claims().get(configProvider.getReferenceBindingClaim());
         if (claimed == null) {
             return true;
         }
@@ -285,8 +284,7 @@ public class Oid4vpCallbackProcessor {
      * on its own, or one this realm did not issue, has no such material and is unaffected.
      */
     private boolean hasUsableSubjectBinding(VpTokenResult vpResult, VerifiedCredential subjectCredential) {
-        boolean carriesBinding =
-                subjectCredential.claims().get(ReferenceCredentialBinding.REFERENCE_BINDING_CLAIM) != null;
+        boolean carriesBinding = subjectCredential.claims().get(configProvider.getReferenceBindingClaim()) != null;
         if (carriesBinding) {
             return true;
         }

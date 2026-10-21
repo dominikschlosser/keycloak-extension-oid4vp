@@ -15,6 +15,7 @@
  */
 package de.arbeitsagentur.keycloak.oid4vp;
 
+import de.arbeitsagentur.keycloak.oid4vp.binding.ReferenceCredentialBinding;
 import de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpClientIdScheme;
 import de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpConstants;
 import de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpRejectionResponse;
@@ -142,6 +143,14 @@ public class Oid4vpIdentityProviderFactory extends AbstractIdentityProviderFacto
                         + "to that user so the credential issued afterwards identifies them.")
                 .type(ProviderConfigProperty.BOOLEAN_TYPE)
                 .defaultValue("false")
+                .add()
+                .property()
+                .name(Oid4vpIdentityProviderConfig.REFERENCE_BINDING_CLAIM)
+                .label("Reference Binding Claim")
+                .helpText("Claim that carries the reference credential binding of a credential this Keycloak "
+                        + "issues. Set the same name on the 'oid4vp-bound-subject-mapper' that writes it.")
+                .type(ProviderConfigProperty.STRING_TYPE)
+                .defaultValue(ReferenceCredentialBinding.DEFAULT_REFERENCE_BINDING_CLAIM)
                 .add()
                 .property()
                 .name(Oid4vpIdentityProviderConfig.SAME_DEVICE_ENABLED)

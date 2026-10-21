@@ -44,7 +44,7 @@ import org.keycloak.util.JsonSerialization;
  */
 public final class ReferenceCredentialBinding {
 
-    public static final String REFERENCE_BINDING_CLAIM = "oid4vp_reference_binding";
+    public static final String DEFAULT_REFERENCE_BINDING_CLAIM = "oid4vp_reference_binding";
 
     public static final String SUBJECT_ATTRIBUTE = "oid4vp.subject";
 

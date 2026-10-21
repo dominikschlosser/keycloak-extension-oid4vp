@@ -15,6 +15,7 @@
  */
 package de.arbeitsagentur.keycloak.oid4vp;
 
+import de.arbeitsagentur.keycloak.oid4vp.binding.ReferenceCredentialBinding;
 import de.arbeitsagentur.keycloak.oid4vp.domain.CredentialSet;
 import de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpClientIdScheme;
 import de.arbeitsagentur.keycloak.oid4vp.domain.Oid4vpConfigProvider;
@@ -89,6 +90,8 @@ public class Oid4vpIdentityProviderConfig extends IdentityProviderModel implemen
      * to. Otherwise the login fails because nothing identified the user.
      */
     public static final String ALLOW_MISSING_SUBJECT_CREDENTIAL = "allowMissingSubjectCredential";
+
+    public static final String REFERENCE_BINDING_CLAIM = "referenceBindingClaim";
 
     public static final String ALLOWED_ISSUERS = "allowedIssuers";
     public static final String REQUIRE_ISSUER_SAN_MATCH = "requireIssuerSanMatch";
@@ -356,6 +359,16 @@ public class Oid4vpIdentityProviderConfig extends IdentityProviderModel implemen
 
     public void setAllowMissingSubjectCredential(boolean allow) {
         getConfig().put(ALLOW_MISSING_SUBJECT_CREDENTIAL, String.valueOf(allow));
+    }
+
+    @Override
+    public String getReferenceBindingClaim() {
+        String claim = getConfig().get(REFERENCE_BINDING_CLAIM);
+        return StringUtil.isBlank(claim) ? ReferenceCredentialBinding.DEFAULT_REFERENCE_BINDING_CLAIM : claim.trim();
+    }
+
+    public void setReferenceBindingClaim(String claim) {
+        getConfig().put(REFERENCE_BINDING_CLAIM, claim);
     }
 
     @Override

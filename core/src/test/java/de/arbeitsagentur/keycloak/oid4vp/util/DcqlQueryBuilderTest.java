@@ -18,6 +18,7 @@ package de.arbeitsagentur.keycloak.oid4vp.util;
 import static org.assertj.core.api.Assertions.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import de.arbeitsagentur.keycloak.oid4vp.binding.ReferenceCredentialBinding;
 import de.arbeitsagentur.keycloak.oid4vp.domain.ClaimSpec;
 import de.arbeitsagentur.keycloak.oid4vp.domain.CredentialSet;
 import de.arbeitsagentur.keycloak.oid4vp.domain.CredentialTypeSpec;
@@ -946,6 +947,11 @@ class DcqlQueryBuilderTest {
             @Override
             public boolean isAllowMissingSubjectCredential() {
                 return false;
+            }
+
+            @Override
+            public String getReferenceBindingClaim() {
+                return ReferenceCredentialBinding.DEFAULT_REFERENCE_BINDING_CLAIM;
             }
 
             @Override
