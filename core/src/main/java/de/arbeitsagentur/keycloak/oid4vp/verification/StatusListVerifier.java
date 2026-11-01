@@ -61,6 +61,8 @@ public class StatusListVerifier {
      */
     private static final Map<CacheKey, CachedStatusList> CACHE = BoundedLruMap.withMaxEntries(MAX_CACHE_ENTRIES);
 
+    private static final int CONNECT_TIMEOUT_MILLIS = 3000;
+
     private final KeycloakSession session;
     private final Duration maxCacheTtl;
     private final int clockSkewSeconds;
@@ -319,6 +321,7 @@ public class StatusListVerifier {
     String fetchStatusListJwt(String uri) throws Exception {
         if (session != null) {
             try (SimpleHttp.Response response = SimpleHttp.doGet(uri, session)
+                    .connectTimeoutMillis(CONNECT_TIMEOUT_MILLIS)
                     .header("Accept", "application/statuslist+jwt")
                     .asResponse()) {
                 if (response.getStatus() / 100 != 2) {

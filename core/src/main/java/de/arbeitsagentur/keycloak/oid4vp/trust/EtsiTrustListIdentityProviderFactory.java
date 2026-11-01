@@ -40,7 +40,8 @@ public class EtsiTrustListIdentityProviderFactory
             .property()
             .name(EtsiTrustListIdentityProviderConfig.TRUST_LIST_SIGNING_CERT_PEM)
             .label("Trust List Signing Certificate (PEM)")
-            .helpText("PEM-encoded X.509 certificate that verifies the trust list JWT signature. "
+            .helpText("PEM-encoded X.509 certificates of the list signer, several for key rotation. Only their "
+                    + "keys verify the trust list JWT signature, so a CA certificate does not vouch for what it issues. "
                     + "Without it, the signature is not verified and the fetched trust list is trusted as is. "
                     + "Use that for local testing only. "
                     + "Accepts the value verbatim or Base64-encoded as a whole, for single-line sources such as "
@@ -58,16 +59,18 @@ public class EtsiTrustListIdentityProviderFactory
             .property()
             .name(EtsiTrustListIdentityProviderConfig.TRUST_LIST_MAX_CACHE_TTL_SECONDS)
             .label("Trust List Cache TTL (seconds)")
-            .helpText("Maximum time to cache the trust list. "
-                    + "Leave empty to use ETSI NextUpdate and HTTP cache headers.")
+            .helpText("Maximum time to cache the trust list. A list is cached until its ETSI NextUpdate and never "
+                    + "longer than this value, so it decides how soon a withdrawn CA stops being trusted. HTTP cache "
+                    + "headers do not apply. A list without NextUpdate is closed and trusts nothing. "
+                    + "Set to 0 to fetch on every use.")
             .type(ProviderConfigProperty.STRING_TYPE)
+            .defaultValue(String.valueOf(EtsiTrustListIdentityProviderConfig.DEFAULT_TRUST_LIST_MAX_CACHE_TTL_SECONDS))
             .add()
             .property()
             .name(EtsiTrustListIdentityProviderConfig.TRUST_LIST_MAX_STALE_AGE_SECONDS)
             .label("Trust List Max Stale Age (seconds)")
-            .helpText("Maximum age of a stale (expired) trust list cache entry that can be used as fallback "
-                    + "when a trust list refresh fails (e.g., network timeout). "
-                    + "Set to 0 to disable stale cache usage entirely.")
+            .helpText("How long after its last download a list past NextUpdate stays in use when a refresh "
+                    + "fails. Set to 0 to stop using a list past NextUpdate.")
             .type(ProviderConfigProperty.STRING_TYPE)
             .defaultValue(String.valueOf(EtsiTrustListIdentityProviderConfig.DEFAULT_TRUST_LIST_MAX_STALE_AGE_SECONDS))
             .add()

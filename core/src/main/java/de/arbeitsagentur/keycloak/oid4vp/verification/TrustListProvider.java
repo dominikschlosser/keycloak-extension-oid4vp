@@ -15,6 +15,8 @@
  */
 package de.arbeitsagentur.keycloak.oid4vp.verification;
 
+import de.arbeitsagentur.keycloak.oid4vp.event.Oid4vpEventService;
+import de.arbeitsagentur.keycloak.oid4vp.event.TrustMaterialFailedEvent;
 import de.arbeitsagentur.keycloak.oid4vp.util.CertificateFingerprints;
 import de.arbeitsagentur.keycloak.oid4vp.util.FailureDetails;
 import de.arbeitsagentur.keycloak.oid4vp.verification.trustlist.ServiceDigitalIdentity;
@@ -27,14 +29,10 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -53,12 +51,19 @@ public class TrustListProvider {
 
     private static final Logger LOG = Logger.getLogger(TrustListProvider.class);
     private static final ConcurrentHashMap<CacheKey, CachedTrustList> CACHE = new ConcurrentHashMap<>();
-    private static final Set<String> WARNED_UNSIGNED_TRUST_LISTS = ConcurrentHashMap.newKeySet();
+    private static final Set<CacheKey> WARNED_UNSIGNED_TRUST_LISTS = ConcurrentHashMap.newKeySet();
     static final Duration DEFAULT_MAX_STALE_AGE = Duration.ofDays(1);
     private static final String SERVICE_TYPE_SUFFIX_ISSUANCE = "/Issuance";
     private static final String SERVICE_TYPE_SUFFIX_REVOCATION = "/Revocation";
+    private static final Duration FAILED_REFRESH_RETRY = Duration.ofMinutes(1);
+    private static final int CONNECT_TIMEOUT_MILLIS = 3000;
+    private static final String UNAVAILABLE_ATTRIBUTE = "oid4vp.trust-list.unavailable";
+    private static final Map<CacheKey, Instant> RETRY_AFTER = new ConcurrentHashMap<>();
+    private static final String SERVICE_STATUS_NOTIFIED =
+            "http://uri.etsi.org/19602/PubEAAProvidersList/SvcStatus/notified";
 
     private final KeycloakSession session;
+    private final String providerId;
     private final String trustListUrl;
     private final List<X509Certificate> staticCertificates;
     private final Duration maxCacheTtl;
@@ -70,10 +75,6 @@ public class TrustListProvider {
         this(session, trustListUrl, null, null, null);
     }
 
-    /**
-     * @param signingCertificates the certificates that verify the trust list JWT signature, as
-     *     {@link X5cChainValidator} describes. Null or empty leaves the signature unverified.
-     */
     TrustListProvider(
             KeycloakSession session,
             String trustListUrl,
@@ -82,18 +83,25 @@ public class TrustListProvider {
         this(session, trustListUrl, maxCacheTtl, null, signingCertificates);
     }
 
-    /**
-     * @param maxStaleAge maximum age of an expired cache entry that may still serve as a fallback
-     *     when a trust list refresh fails. Null defaults to one day, and {@link Duration#ZERO}
-     *     disables the stale cache entirely.
-     */
-    public TrustListProvider(
+    TrustListProvider(
             KeycloakSession session,
             String trustListUrl,
             Duration maxCacheTtl,
             Duration maxStaleAge,
             List<X509Certificate> signingCertificates) {
+        this(session, null, trustListUrl, maxCacheTtl, maxStaleAge, signingCertificates);
+    }
+
+    // Keys the cache by provider id, so providers sharing a trust list stay isolated.
+    public TrustListProvider(
+            KeycloakSession session,
+            String providerId,
+            String trustListUrl,
+            Duration maxCacheTtl,
+            Duration maxStaleAge,
+            List<X509Certificate> signingCertificates) {
         this.session = session;
+        this.providerId = providerId;
         this.trustListUrl = trustListUrl;
         this.staticCertificates = null;
         this.maxCacheTtl = maxCacheTtl;
@@ -101,9 +109,9 @@ public class TrustListProvider {
         this.signingCertificates = signingCertificates;
     }
 
-    // Serves a fixed certificate list, such as a pasted PEM bundle.
     public TrustListProvider(List<X509Certificate> staticCertificates) {
         this.session = null;
+        this.providerId = null;
         this.trustListUrl = null;
         this.staticCertificates = staticCertificates != null ? List.copyOf(staticCertificates) : null;
         this.maxCacheTtl = null;
@@ -142,28 +150,41 @@ public class TrustListProvider {
             LOG.debugf("Using cached trust list for %s (expires %s)", trustListUrl, cached.expiresAt);
             return cached;
         }
+        // Skips the download only with a copy to use, so a login never fails on a past failure.
+        boolean staleCopy = cached != null && !cached.certificates.isEmpty() && staleCopyUsable(cached);
+        if (staleCopy && Instant.now().isBefore(RETRY_AFTER.getOrDefault(cacheKey, Instant.MIN))) {
+            currentLoTEType = cached.loTEType;
+            return cached;
+        }
+        // Lets one login download while the others use the copy, because the download can hang.
+        if (staleCopy) {
+            RETRY_AFTER.put(cacheKey, Instant.now().plus(FAILED_REFRESH_RETRY));
+        }
 
         try {
-            FetchedTrustList fetched = fetchTrustListJwt();
-            verifySignature(fetched.jwt());
-            TrustListParseResult result = parseTrustListJwt(fetched.jwt());
+            String jwt = fetchTrustListJwt();
+            verifySignature(jwt);
+            TrustListParseResult result = parseTrustListJwt(jwt);
             currentLoTEType = result.loTEType;
+            if (result.expiresAt == null) {
+                return closedList(cacheKey);
+            }
             Instant now = Instant.now();
-            if (result.expiresAt != null && !now.isBefore(result.expiresAt)) {
+            if (!now.isBefore(result.expiresAt)) {
                 throw new IllegalStateException("Trust list from " + trustListUrl + " is expired: valid until "
                         + FailureDetails.relativeToNow(result.expiresAt) + ", local time " + now);
             }
-            Instant effectiveExpiry = capExpiry(earliestInstant(result.expiresAt, fetched.httpCacheExpiresAt()));
+            Instant effectiveExpiry = capExpiry(result.expiresAt);
             CachedTrustList refreshed = new CachedTrustList(
                     List.copyOf(result.certificates),
                     List.copyOf(result.issuanceCertificates),
                     List.copyOf(result.revocationCertificates),
                     effectiveExpiry,
                     Instant.now(),
+                    result.expiresAt,
                     result.loTEType);
-            if (effectiveExpiry != null) {
-                CACHE.put(cacheKey, refreshed);
-            }
+            CACHE.put(cacheKey, refreshed);
+            RETRY_AFTER.remove(cacheKey);
 
             if (refreshed.certificates.isEmpty()) {
                 LOG.warnf(
@@ -179,10 +200,7 @@ public class TrustListProvider {
                     formatInstant(effectiveExpiry));
             return refreshed;
         } catch (Exception e) {
-            if (cached != null
-                    && !cached.certificates.isEmpty()
-                    && !Duration.ZERO.equals(maxStaleAge)
-                    && Instant.now().isBefore(cached.fetchedAt.plus(maxStaleAge))) {
+            if (staleCopy) {
                 currentLoTEType = cached.loTEType;
                 LOG.warnf(
                         e,
@@ -192,6 +210,7 @@ public class TrustListProvider {
                         cached.certificates.size(),
                         cached.fetchedAt,
                         cached.expiresAt);
+                fireRefreshFailed(true, e);
                 return cached;
             }
             LOG.warnf(
@@ -199,8 +218,47 @@ public class TrustListProvider {
                     "Failed to fetch trust list from %s: %s. No stale copy is available, so it trusts nothing",
                     trustListUrl,
                     FailureDetails.causeChain(e));
+            fireRefreshFailed(false, e);
+            if (session != null) {
+                session.setAttribute(UNAVAILABLE_ATTRIBUTE, Boolean.TRUE);
+            }
             return CachedTrustList.empty();
         }
+    }
+
+    // Drops the cached copy as well, because a closed list expires its services (ETSI TS 119 602
+    // V1.1.1 clause 6.3.15) and a stale copy must not outlive that.
+    private CachedTrustList closedList(CacheKey cacheKey) {
+        CACHE.remove(cacheKey);
+        LOG.warnf("Trust list from %s has no NextUpdate, so it is closed and trusts nothing", trustListUrl);
+        fireRefreshFailed(false, new IllegalStateException("The trust list is closed: it has no NextUpdate"));
+        return CachedTrustList.empty();
+    }
+
+    // Accepts a copy until its NextUpdate, because the cache TTL expires a list long before that.
+    private boolean staleCopyUsable(CachedTrustList cached) {
+        Instant now = Instant.now();
+        return now.isBefore(cached.validUntil)
+                || (!Duration.ZERO.equals(maxStaleAge) && now.isBefore(cached.fetchedAt.plus(maxStaleAge)));
+    }
+
+    // Tells whether a list of this request had no usable copy.
+    static boolean unavailableIn(KeycloakSession session) {
+        return session != null && session.getAttribute(UNAVAILABLE_ATTRIBUTE) != null;
+    }
+
+    private void fireRefreshFailed(boolean staleDataInUse, Exception e) {
+        Oid4vpEventService.fireOnce(
+                session,
+                "oid4vp.event.trust-list-failed." + cacheKey(),
+                new TrustMaterialFailedEvent(
+                        Oid4vpEventService.realmId(session),
+                        providerId,
+                        TrustMaterialFailedEvent.Failure.REFRESH_FAILED,
+                        trustListUrl,
+                        staleDataInUse,
+                        FailureDetails.causeChain(e),
+                        Instant.now()));
     }
 
     /**
@@ -212,8 +270,8 @@ public class TrustListProvider {
      * because no certificate in a credential chain points at it.
      *
      * <p>The value is the Subject Key Identifier of the CA. A CA without one falls back to its AKI
-     * extension, which names its own issuer. No synthetic identifier is derived, because {@code aki}
-     * values stand for certificate extension values.
+     * extension, which names its own issuer. No synthetic identifier is derived, because an
+     * {@code aki} value has to be the value of a certificate extension.
      */
     public List<String> getTrustedAuthorityKeyIdentifiers() {
         return authorityKeyIdentifiersOf(getIssuanceCertificates().stream()
@@ -238,16 +296,26 @@ public class TrustListProvider {
 
     void verifySignature(String jwt) throws Exception {
         if (signingCertificates == null || signingCertificates.isEmpty()) {
-            if (WARNED_UNSIGNED_TRUST_LISTS.add(trustListUrl)) {
+            if (WARNED_UNSIGNED_TRUST_LISTS.add(cacheKey())) {
                 LOG.warnf(
                         "Trust list JWT signature not verified for %s: no signing certificate configured",
                         trustListUrl);
+                Oid4vpEventService.fire(
+                        session,
+                        new TrustMaterialFailedEvent(
+                                Oid4vpEventService.realmId(session),
+                                providerId,
+                                TrustMaterialFailedEvent.Failure.UNSIGNED,
+                                trustListUrl,
+                                false,
+                                "No signing certificate is configured",
+                                Instant.now()));
             }
             return;
         }
 
         try {
-            X5cChainValidator.verifyJwtSignature(jwt, signingCertificates);
+            X5cChainValidator.verifyJwtSignatureWithPinnedKeys(jwt, signingCertificates);
         } catch (Exception e) {
             throw new IllegalStateException(
                     "Trust list JWT from " + trustListUrl + " failed signature verification against "
@@ -258,9 +326,6 @@ public class TrustListProvider {
     }
 
     private Instant capExpiry(Instant expiry) {
-        if (expiry == null) {
-            return null;
-        }
         if (maxCacheTtl != null) {
             Instant maxExpiry = Instant.now().plus(maxCacheTtl);
             return expiry.isBefore(maxExpiry) ? expiry : maxExpiry;
@@ -268,23 +333,27 @@ public class TrustListProvider {
         return expiry;
     }
 
-    protected FetchedTrustList fetchTrustListJwt() throws Exception {
+    // Ignores HTTP cache headers, because the list is a signed object that states its own freshness
+    // in NextUpdate. trustListMaxCacheTtlSeconds bounds how late an early reissue is noticed.
+    protected String fetchTrustListJwt() throws Exception {
         if (session != null) {
             try (SimpleHttp.Response response = SimpleHttp.doGet(trustListUrl, session)
+                    .connectTimeoutMillis(CONNECT_TIMEOUT_MILLIS)
                     .header("Accept", "application/jwt")
                     .asResponse()) {
                 if (response.getStatus() / 100 != 2) {
                     throw new IllegalStateException("HTTP " + response.getStatus() + " fetching trust list from "
                             + trustListUrl + " (" + FailureDetails.httpResponse(response) + ")");
                 }
-                return new FetchedTrustList(response.asString(), resolveHttpCacheExpiry(response));
+                return response.asString();
             }
         }
         throw new IllegalStateException("No KeycloakSession available for HTTP requests");
     }
 
     CacheKey cacheKey() {
-        return new CacheKey(trustListUrl, CertificateFingerprints.of(signingCertificates), maxCacheTtl, maxStaleAge);
+        return new CacheKey(
+                providerId, trustListUrl, CertificateFingerprints.of(signingCertificates), maxCacheTtl, maxStaleAge);
     }
 
     static String extractAuthorityKeyIdentifier(X509Certificate certificate) {
@@ -423,6 +492,9 @@ public class TrustListProvider {
                 continue;
             }
             var serviceInformation = service.serviceInformation();
+            if (!isCurrentService(serviceInformation.serviceStatus())) {
+                continue;
+            }
             ServiceDigitalIdentity digitalIdentity = serviceInformation.serviceDigitalIdentity();
             if (digitalIdentity != null) {
                 List<X509Certificate> parsed = parseCertificates(digitalIdentity.x509Certificates());
@@ -435,6 +507,12 @@ public class TrustListProvider {
                 }
             }
         }
+    }
+
+    // Accepts a missing status, because the other lists forbid the component (ETSI TS 119 602 V1.1.1
+    // Annex H). The Pub-EAA list keeps withdrawn providers listed, so only "notified" counts.
+    private static boolean isCurrentService(String serviceStatus) {
+        return serviceStatus == null || SERVICE_STATUS_NOTIFIED.equals(serviceStatus);
     }
 
     private static List<X509Certificate> parseCertificates(List<X509CertificateEntry> x509Certs) {
@@ -486,57 +564,38 @@ public class TrustListProvider {
         return Instant.parse(value);
     }
 
-    private static Instant resolveHttpCacheExpiry(SimpleHttp.Response response) throws Exception {
-        Instant now = Instant.now();
-        String cacheControl = response.getFirstHeader("Cache-Control");
-        if (cacheControl != null) {
-            for (String directive : cacheControl.split(",")) {
-                String trimmed = directive.trim().toLowerCase(Locale.ROOT);
-                if ("no-store".equals(trimmed) || "no-cache".equals(trimmed) || "max-age=0".equals(trimmed)) {
-                    return now;
-                }
-                if (trimmed.startsWith("max-age=")) {
-                    try {
-                        long maxAgeSeconds = Long.parseLong(trimmed.substring("max-age=".length()));
-                        return now.plusSeconds(Math.max(0, maxAgeSeconds));
-                    } catch (NumberFormatException ignored) {
-                        // Ignore malformed max-age and fall back to Expires.
-                    }
-                }
-            }
-        }
-
-        String expires = response.getFirstHeader("Expires");
-        if (expires == null || expires.isBlank()) {
-            return null;
-        }
-        return ZonedDateTime.parse(expires, DateTimeFormatter.RFC_1123_DATE_TIME)
-                .withZoneSameInstant(ZoneOffset.UTC)
-                .toInstant();
-    }
-
-    private static Instant earliestInstant(Instant first, Instant second) {
-        if (first == null) return second;
-        if (second == null) return first;
-        return first.isBefore(second) ? first : second;
-    }
-
     private static String formatInstant(Instant instant) {
         return instant != null ? instant.toString() : "none";
     }
 
-    // For tests only.
+    // Exists for tests only.
     static void clearCache() {
         CACHE.clear();
+        RETRY_AFTER.clear();
     }
 
-    // For tests of the stale cache fallback.
+    // Exists for tests of the stale cache fallback.
     static void seedExpiredCache(
             TrustListProvider provider, List<X509Certificate> certificates, Instant expiredAt, Instant fetchedAt) {
+        seedExpiredCache(provider, certificates, expiredAt, fetchedAt, expiredAt);
+    }
+
+    static void seedExpiredCache(
+            TrustListProvider provider,
+            List<X509Certificate> certificates,
+            Instant expiredAt,
+            Instant fetchedAt,
+            Instant validUntil) {
         CACHE.put(
                 provider.cacheKey(),
                 new CachedTrustList(
-                        certificates, certificates, certificates, expiredAt, fetchedAt, provider.currentLoTEType));
+                        certificates,
+                        certificates,
+                        certificates,
+                        expiredAt,
+                        fetchedAt,
+                        validUntil,
+                        provider.currentLoTEType));
     }
 
     record TrustListParseResult(
@@ -546,9 +605,8 @@ public class TrustListProvider {
             Instant expiresAt,
             String loTEType) {}
 
-    record FetchedTrustList(String jwt, Instant httpCacheExpiresAt) {}
-
     record CacheKey(
+            String providerId,
             String trustListUrl,
             List<String> signingCertificateFingerprints,
             Duration maxCacheTtl,
@@ -560,13 +618,14 @@ public class TrustListProvider {
             List<X509Certificate> revocationCertificates,
             Instant expiresAt,
             Instant fetchedAt,
+            Instant validUntil,
             String loTEType) {
         boolean isValid() {
             return Instant.now().isBefore(expiresAt);
         }
 
         static CachedTrustList empty() {
-            return new CachedTrustList(List.of(), List.of(), List.of(), Instant.EPOCH, Instant.EPOCH, null);
+            return new CachedTrustList(List.of(), List.of(), List.of(), Instant.EPOCH, Instant.EPOCH, null, null);
         }
     }
 }

@@ -44,6 +44,7 @@ public class EtsiTrustListIdentityProviderConfig extends IdentityProviderModel {
     public static final String SERVED_CREDENTIAL_TYPES = ServedCredentialTypes.CONFIG_KEY;
     public static final String ADVERTISE_TRUSTED_AUTHORITIES = "advertiseTrustedAuthorities";
 
+    public static final int DEFAULT_TRUST_LIST_MAX_CACHE_TTL_SECONDS = 3600;
     public static final int DEFAULT_TRUST_LIST_MAX_STALE_AGE_SECONDS = 86400;
 
     public EtsiTrustListIdentityProviderConfig() {}
@@ -71,6 +72,8 @@ public class EtsiTrustListIdentityProviderConfig extends IdentityProviderModel {
         }
         parseTrustListSigningCerts();
         getAdvertisedTrustedAuthorityType();
+        ConfigValues.requireSeconds(getConfig(), TRUST_LIST_MAX_CACHE_TTL_SECONDS);
+        ConfigValues.requireSeconds(getConfig(), TRUST_LIST_MAX_STALE_AGE_SECONDS);
     }
 
     public String getTrustListUrl() {
@@ -98,7 +101,8 @@ public class EtsiTrustListIdentityProviderConfig extends IdentityProviderModel {
     }
 
     public Duration getTrustListMaxCacheTtl() {
-        return parseDurationSeconds(getConfig().get(TRUST_LIST_MAX_CACHE_TTL_SECONDS));
+        Duration parsed = parseDurationSeconds(getConfig().get(TRUST_LIST_MAX_CACHE_TTL_SECONDS));
+        return parsed != null ? parsed : Duration.ofSeconds(DEFAULT_TRUST_LIST_MAX_CACHE_TTL_SECONDS);
     }
 
     public void setTrustListMaxCacheTtlSeconds(int seconds) {
