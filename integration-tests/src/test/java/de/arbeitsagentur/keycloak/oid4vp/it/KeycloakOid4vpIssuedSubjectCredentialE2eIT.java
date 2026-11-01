@@ -21,6 +21,7 @@ import de.arbeitsagentur.keycloak.oid4vp.Oid4vpIdentityProviderConfig;
 import de.arbeitsagentur.keycloak.oid4vp.authentication.Oid4vpPresentationAuthenticatorFactory;
 import de.arbeitsagentur.keycloak.oid4vp.authentication.Oid4vpPresentationRequiredAction;
 import de.arbeitsagentur.keycloak.oid4vp.authentication.Oid4vpSubjectCredentialOffer;
+import de.arbeitsagentur.keycloak.oid4vp.event.Oid4vpEventDetails;
 import de.arbeitsagentur.keycloak.oid4vp.it.framework.InjectTestWallet;
 import de.arbeitsagentur.keycloak.oid4vp.it.framework.TestCertificates;
 import de.arbeitsagentur.keycloak.oid4vp.it.framework.TestWallet;
@@ -73,7 +74,7 @@ import org.keycloak.testframework.annotations.KeycloakIntegrationTest;
  * It carries a subject derived for that account and the reference credential binding of the PID it
  * was issued alongside. The next presentation reaches the same account without a password.
  */
-@KeycloakIntegrationTest(config = Oid4vpServerConfig.class)
+@KeycloakIntegrationTest(config = KeycloakOid4vpEventsE2eIT.EventBridgeServerConfig.class)
 class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
 
     private static final String EMPLOYEE_VCT = "https://kc.example/employee";
@@ -200,6 +201,9 @@ class KeycloakOid4vpIssuedSubjectCredentialE2eIT extends AbstractOid4vpE2eTest {
         assertThat(page.locator("input[name='password']").count())
                 .as("the credential was issued for another person's PID, so it identifies nobody here")
                 .isPositive();
+        assertThat(eventsOfType("PRESENTATION_REFUSED", 1)).anySatisfy(event -> assertThat(event.getDetails())
+                .containsEntry(Oid4vpEventDetails.REFUSAL, "CREDENTIAL_IGNORED")
+                .containsKey(Oid4vpEventDetails.STATE));
     }
 
     /**

@@ -1,1 +1,2 @@
 de.arbeitsagentur.keycloak.oid4vp.binding.ReferenceCredentialBindingSpi
+de.arbeitsagentur.keycloak.oid4vp.event.Oid4vpEventSpi

@@ -77,6 +77,15 @@ class StatusListVerifierTest {
     }
 
     @Test
+    void identifierListLeavesRevocationUnchecked() {
+        Map<String, Object> payload = Map.of(
+                "status", Map.of("identifier_list", Map.of("uri", "https://issuer.example/ids/abc", "id", "42")));
+
+        assertThat(verifier.extractStatusReference(payload)).isNull();
+        verifier.checkRevocationStatus(payload);
+    }
+
+    @Test
     void returnsNullForMissingStatusClaim() {
         assertThat(verifier.extractStatusReference(Map.of())).isNull();
         assertThat(verifier.extractStatusReference(null)).isNull();

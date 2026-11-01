@@ -15,6 +15,9 @@
  */
 package de.arbeitsagentur.keycloak.oid4vp.trust;
 
+import de.arbeitsagentur.keycloak.oid4vp.event.Oid4vpEventService;
+import de.arbeitsagentur.keycloak.oid4vp.event.TrustMaterialFailedEvent;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -67,6 +70,17 @@ public class Oid4vpTrustMaterialResolver {
                     "None of the configured trust material identity providers %s could be resolved;"
                             + " every credential verification is rejected",
                     configuredAliases);
+            Oid4vpEventService.fireOnce(
+                    session,
+                    "oid4vp.event.trust-unavailable." + aliases,
+                    new TrustMaterialFailedEvent(
+                            Oid4vpEventService.realmId(session),
+                            null,
+                            TrustMaterialFailedEvent.Failure.UNAVAILABLE,
+                            String.join(",", configuredAliases),
+                            false,
+                            "None of the configured providers could be resolved",
+                            Instant.now()));
         }
         return new CredentialTrustPlan(providers, !configuredAliases.isEmpty());
     }
