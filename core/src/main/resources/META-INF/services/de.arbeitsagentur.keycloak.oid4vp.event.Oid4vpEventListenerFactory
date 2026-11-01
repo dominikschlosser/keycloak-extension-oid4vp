@@ -1,0 +1,2 @@
+de.arbeitsagentur.keycloak.oid4vp.event.KeycloakEventBridgeListenerFactory
+de.arbeitsagentur.keycloak.oid4vp.event.LoggingOid4vpEventListenerFactory
