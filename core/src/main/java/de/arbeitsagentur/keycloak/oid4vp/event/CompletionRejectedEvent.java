@@ -24,7 +24,8 @@ public record CompletionRejectedEvent(
 
     public enum Rejection {
         RESPONSE_CODE,
-        BROWSER_MISMATCH
+        BROWSER_MISMATCH,
+        REPEATED_PRESENTATION
     }
 
     @Override

@@ -67,6 +67,7 @@ public class Oid4vpDirectPostService {
     public static final String CROSS_DEVICE_FAILED_PREFIX = "oid4vp_failed:";
     public static final String DEFERRED_AUTH_PREFIX = "oid4vp_deferred:";
     public static final String FAILURE_PREFIX = "oid4vp_failure:";
+    private static final String PRESENTATION_CLAIM_PREFIX = "oid4vp_presentation_claim:";
     public static final String DEFERRED_IDENTITY_NOTE = "OID4VP_DEFERRED_IDENTITY";
     public static final String DEFERRED_CLAIMS_NOTE = "OID4VP_DEFERRED_CLAIMS";
 
@@ -130,10 +131,38 @@ public class Oid4vpDirectPostService {
         Map<String, String> existing = ownSignal(DEFERRED_AUTH_PREFIX + state);
         if (existing != null && StringUtil.isNotBlank(existing.get(KEY_RESPONSE_CODE))) {
             LOG.debugf("Ignoring repeated direct_post for already-completed state=%s", state);
+            fireCompletionRejected(
+                    state,
+                    CompletionRejectedEvent.Rejection.REPEATED_PRESENTATION,
+                    "The state already has a verified presentation");
             return responseFactory.jsonRedirectResponse(
                     buildCompleteAuthUrl(endpointBaseUrl, state, existing.get(KEY_RESPONSE_CODE)), isCrossDevice);
         }
 
+        // Claims the state, because concurrent posts can all pass the check above and the last one
+        // would replace the identity of the first.
+        if (!session.singleUseObjects().putIfAbsent(PRESENTATION_CLAIM_PREFIX + state, deferredAuthTtlSeconds)) {
+            fireCompletionRejected(
+                    state,
+                    CompletionRejectedEvent.Rejection.REPEATED_PRESENTATION,
+                    "Another presentation claimed the state first");
+            return responseFactory.jsonErrorResponse(Response.Status.BAD_REQUEST, "invalid_request", null);
+        }
+        try {
+            return storeVerified(authSession, state, flow, endpointBaseUrl, context, isCrossDevice);
+        } catch (RuntimeException e) {
+            session.singleUseObjects().remove(PRESENTATION_CLAIM_PREFIX + state);
+            throw e;
+        }
+    }
+
+    private Response storeVerified(
+            AuthenticationSessionModel authSession,
+            String state,
+            String flow,
+            String endpointBaseUrl,
+            BrokeredIdentityContext context,
+            boolean isCrossDevice) {
         String rootSessionId = authSession.getParentSession() != null
                 ? authSession.getParentSession().getId()
                 : null;
@@ -231,6 +260,8 @@ public class Oid4vpDirectPostService {
         session.singleUseObjects().remove(CROSS_DEVICE_COMPLETE_PREFIX + state);
         Map<String, String> consumedSignal = session.singleUseObjects().remove(DEFERRED_AUTH_PREFIX + state);
         if (consumedSignal == null) {
+            fireCompletionRejected(
+                    state, CompletionRejectedEvent.Rejection.RESPONSE_CODE, "The response code was already used");
             return ErrorPage.error(
                     session, activeAuthSession, Response.Status.BAD_REQUEST, Oid4vpMessages.LOGIN_EXPIRED);
         }

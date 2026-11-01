@@ -178,6 +178,26 @@ class KeycloakOid4vpEventsE2eIT extends AbstractOid4vpE2eTest {
     }
 
     @Test
+    void completionWithoutAResponseCodeIsRejected() throws Exception {
+        openInAnotherBrowser(keycloakUrls.getBase() + "/realms/" + REALM + "/broker/oid4vp/endpoint/complete-auth");
+
+        assertThat(eventsOfType("COMPLETION_REJECTED", 1).get(0).getDetails())
+                .containsEntry(Oid4vpEventDetails.REJECTION, "RESPONSE_CODE");
+    }
+
+    @Test
+    void repeatedPresentationIsReportedAndChangesNothing() throws Exception {
+        String walletUrl = openWalletPage();
+        String redirectUri = flow.submitToWallet(walletUrl).redirectUri();
+
+        assertThat(flow.submitToWallet(walletUrl).redirectUri()).isEqualTo(redirectUri);
+
+        assertThat(eventsOfType("PRESENTATION_VERIFIED", 1)).hasSize(1);
+        assertThat(eventsOfType("COMPLETION_REJECTED", 1).get(0).getDetails())
+                .containsEntry(Oid4vpEventDetails.REJECTION, "REPEATED_PRESENTATION");
+    }
+
+    @Test
     void failureLinkWithAWrongResponseCodeIsRejected() throws Exception {
         String state = fetchRequestObject(openWalletPage()).getJWTClaimsSet().getStringClaim("state");
 
