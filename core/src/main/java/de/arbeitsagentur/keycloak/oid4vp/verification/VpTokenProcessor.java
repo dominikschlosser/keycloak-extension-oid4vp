@@ -84,12 +84,14 @@ public class VpTokenProcessor implements VpTokenVerifier {
     }
 
     public VpTokenProcessor(ObjectMapper objectMapper, Config config) {
+        CrlVerifier crlVerifier = new CrlVerifier(config.session());
         this.sdJwtVerifier = new SdJwtVerifier(
                 config.clockSkewSeconds(),
                 config.kbJwtMaxAgeSeconds(),
                 new JwtVcIssuerMetadataResolver(config.session(), config.issuerMetadataMaxCacheTtl()),
-                config.requireIssuerSanMatch());
-        this.mdocVerifier = new MdocVerifier(config.clockSkewSeconds());
+                config.requireIssuerSanMatch(),
+                crlVerifier);
+        this.mdocVerifier = new MdocVerifier(config.clockSkewSeconds(), crlVerifier);
         this.trustPlanSupplier = config.trustPlanSupplier();
         this.session = config.session();
         this.statusListVerifier =
