@@ -8,7 +8,7 @@ The extension fires events for security relevant decisions. Events hold no crede
 
 | Event | When Fired | Key Data |
 |-------|------------|----------|
-| `PresentationVerifiedEvent` | A wallet presentation passed verification. | `state`, `flow`, `credentialTypes` |
+| `PresentationVerifiedEvent` | A wallet presentation passed verification. A repeated verified presentation for the same state fires none | `state`, `flow`, `credentialTypes` |
 | `PresentationFailedEvent` | A wallet response ended without a verified presentation | `state`, `flow`, `origin`, `error`, `reason` |
 | `PresentationRefusedEvent` | A login or a verified presentation does not meet what the flow requires | `userId`, `state`, `refusal`, `reason` |
 | `CompletionRejectedEvent` | Keycloak refused a step towards completing a login | `state`, `rejection`, `reason` |
@@ -29,6 +29,7 @@ Match on the enum attributes. `reason` is free text and can change.
 | | `CREDENTIAL_IGNORED` | Keycloak left a credential out, because it was issued for another presentation or lacks a reference binding. The login continues without it |
 | `rejection` | `RESPONSE_CODE` | The state has no record, or the response code does not match it |
 | | `BROWSER_MISMATCH` | The browser is not the one that started the login |
+| | `REPEATED_PRESENTATION` | A further verified presentation arrived for a state that already has one. A wallet retry looks the same. The first presentation stays in force |
 | `mechanism` | `STATUS_LIST`, `CRL`, `IDENTIFIER_LIST` | How the revocation is published. `IDENTIFIER_LIST` only occurs on `RevocationCheckFailedEvent`, because the extension does not read identifier lists |
 | `failure` | `REFRESH_FAILED` | A trust list could not be fetched or verified, or it is closed. Fires at most once per provider and request, and not during the retry pause. Without a stale copy the list adds no certificates |
 | | `UNSIGNED` | Keycloak read a trust list without a signature check, once per provider on each node, before it parses the list, or a status list, once per download |

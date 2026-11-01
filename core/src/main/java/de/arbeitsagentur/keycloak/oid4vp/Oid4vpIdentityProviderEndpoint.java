@@ -133,9 +133,12 @@ public class Oid4vpIdentityProviderEndpoint {
             @FormParam(OAuth2Constants.ERROR) String error,
             @FormParam(OAuth2Constants.ERROR_DESCRIPTION) String errorDescription) {
 
+        // Starts with the form state, which an encrypted post leaves empty.
+        String eventState = state;
         try {
             IncomingPost incomingPost = new IncomingPost(state, vpToken, encryptedResponse, error, errorDescription);
             ResolvedRequest resolvedRequest = resolveRequest(incomingPost.state(), incomingPost.encryptedResponse());
+            eventState = resolvedRequest.state();
             AuthenticationSessionModel authSession =
                     authSessionResolver.resolveFromRequestContext(resolvedRequest.requestContext());
             if (authSession == null) {
@@ -181,7 +184,7 @@ public class Oid4vpIdentityProviderEndpoint {
             LOG.warnf(
                     "OID4VP IdP '%s': rejected wallet response for state=%s before verification: %s",
                     provider.getConfig().getAlias(), FailureDetails.singleLine(state), FailureDetails.causeChain(e));
-            fireTransportFailure(state, FailureDetails.causeChain(e));
+            fireTransportFailure(eventState, FailureDetails.causeChain(e));
             return handleError("identity_provider_error", e.getMessage());
         } catch (Exception e) {
             LOG.errorf(e, "Uncaught exception in handlePost: %s", e.getMessage());
@@ -191,7 +194,7 @@ public class Oid4vpIdentityProviderEndpoint {
                             Oid4vpEventService.realmId(session),
                             provider.getConfig().getAlias(),
                             null,
-                            state,
+                            eventState,
                             null,
                             PresentationFailedEvent.Origin.SERVER,
                             null,
@@ -427,7 +430,7 @@ public class Oid4vpIdentityProviderEndpoint {
             @QueryParam(OAuth2Constants.STATE) String state,
             @QueryParam(OID4VCConstants.RESPONSE_CODE) String responseCode) {
         if (StringUtil.isBlank(state) || StringUtil.isBlank(responseCode)) {
-            return browserError(Oid4vpMessages.INVALID_LOGIN_RESPONSE);
+            return rejectIncompleteLink(state);
         }
         return directPostService.completeAuth(state, responseCode, callback, event);
     }
@@ -462,7 +465,7 @@ public class Oid4vpIdentityProviderEndpoint {
             @QueryParam(OAuth2Constants.STATE) String state,
             @QueryParam(OID4VCConstants.RESPONSE_CODE) String responseCode) {
         if (StringUtil.isBlank(state) || StringUtil.isBlank(responseCode)) {
-            return browserError(Oid4vpMessages.INVALID_LOGIN_RESPONSE);
+            return rejectIncompleteLink(state);
         }
 
         // Checks the browser before consuming the record, so another browser cannot burn it.
@@ -565,6 +568,12 @@ public class Oid4vpIdentityProviderEndpoint {
                 requestContext.responseUri(),
                 context,
                 isCrossDeviceFlow);
+    }
+
+    private Response rejectIncompleteLink(String state) {
+        directPostService.fireCompletionRejected(
+                state, CompletionRejectedEvent.Rejection.RESPONSE_CODE, "The state or the response code is missing");
+        return browserError(Oid4vpMessages.INVALID_LOGIN_RESPONSE);
     }
 
     private static boolean noVerdictPossible(Throwable failure) {
