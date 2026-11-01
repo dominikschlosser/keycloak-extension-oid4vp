@@ -41,6 +41,7 @@ Match on the enum attributes. `reason` is free text and can change.
 A `RevocationCheckFailedEvent` does not say whether the login goes on:
 
 - A failed status list check rejects the credential.
+- A CRL check without a known CRL rejects the credential with `crlRequired` and accepts it unchecked otherwise. Without `crlRequired` the event fires once per failed download and for each login that waited. Later logins fire none until the cache TTL ends.
 - An identifier list stays unchecked, and a credential with both an identifier list and a status list still gets the status list check.
 
 A rejection also fires `PresentationFailedEvent` with the same `state`. An event with a `state` and no such match means the credential continued, unchecked unless `staleDataInUse` is true.
@@ -50,6 +51,7 @@ A rejection also fires `PresentationFailedEvent` with the same `state`. An event
 - `clientId` and `userId` are set where known. Most events have no user.
 - `PresentationRefusedEvent` carries `state` only for `CREDENTIAL_IGNORED`.
 - A revocation rejection fires `PresentationFailedEvent` and `RevocationDetectedEvent` with the same `state`.
+- A `RevocationCheckFailedEvent` from a background CRL refresh has no `state`.
 - Wallets and issuers control parts of `reason`, `reference`, `state` and error values, so treat them as untrusted text. `Oid4vpEvent.details()` reduces each value to one line, cut at 1024 characters. The record fields keep the original text.
 
 ### Built-in Listeners
@@ -85,6 +87,7 @@ KC_SPI_OID4VP_EVENT_LISTENER__KEYCLOAK_EVENT_BRIDGE__ENABLED=true
 - The event store keeps only the types enabled in the realm's event configuration. `EventListenerProvider`s enabled in the realm receive every event. To store bridged events, turn on the realm's save events switch and enable `IDENTITY_PROVIDER_RESPONSE`, `IDENTITY_PROVIDER_RESPONSE_ERROR` and `IDENTITY_PROVIDER_LOGIN_ERROR`.
 - The bridge adds no `LOGIN_ERROR`, because it uses identity provider event types, so it does not change brute force counts.
 - The bridge drops events without a realm.
+- An event from a background CRL refresh has no IP address.
 - `CompletionRejectedEvent` and `PresentationFailedEvent` with origin `TRANSPORT` fire on unauthenticated requests, so a client can cause event store writes.
 
 #### Logging Listener (`log`)

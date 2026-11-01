@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import de.arbeitsagentur.keycloak.oid4vp.domain.TrustedAuthority;
 import de.arbeitsagentur.keycloak.oid4vp.domain.TrustedAuthorityType;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.keycloak.models.IdentityProviderModel;
@@ -51,6 +52,18 @@ class EtsiTrustListIdentityProviderFactoryTest {
     }
 
     @Test
+    void crlPolicyComesFromTheProviderConfig() {
+        IdentityProviderModel model = new IdentityProviderModel();
+        model.setInternalId("provider");
+        model.getConfig().put(EtsiTrustListIdentityProviderConfig.CRL_ENDPOINT, "https://ca.example/ca.crl");
+        model.getConfig().put(EtsiTrustListIdentityProviderConfig.CRL_MAX_CACHE_TTL_SECONDS, "60");
+        model.getConfig().put(EtsiTrustListIdentityProviderConfig.CRL_REQUIRED, "true");
+
+        assertThat(factory.create(null, model).crlPolicy())
+                .isEqualTo(new CrlPolicy("provider", "https://ca.example/ca.crl", Duration.ofSeconds(60), true));
+    }
+
+    @Test
     void createConfigIsHiddenFromLogin() {
         EtsiTrustListIdentityProviderConfig config = factory.createConfig();
         assertThat(config.isHideOnLogin()).isTrue();
@@ -77,6 +90,9 @@ class EtsiTrustListIdentityProviderFactoryTest {
                         EtsiTrustListIdentityProviderConfig.TRUSTED_CERTIFICATES,
                         EtsiTrustListIdentityProviderConfig.SERVED_CREDENTIAL_TYPES,
                         EtsiTrustListIdentityProviderConfig.ADVERTISE_TRUSTED_AUTHORITIES,
+                        EtsiTrustListIdentityProviderConfig.CRL_ENDPOINT,
+                        EtsiTrustListIdentityProviderConfig.CRL_MAX_CACHE_TTL_SECONDS,
+                        EtsiTrustListIdentityProviderConfig.CRL_REQUIRED,
                         EtsiTrustListIdentityProviderConfig.REQUIRED_EXTENDED_KEY_USAGES);
     }
 }

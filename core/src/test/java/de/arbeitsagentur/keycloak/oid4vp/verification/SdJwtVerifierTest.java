@@ -30,6 +30,7 @@ import com.nimbusds.jose.util.Base64URL;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import de.arbeitsagentur.keycloak.oid4vp.domain.SdJwtVerificationResult;
+import de.arbeitsagentur.keycloak.oid4vp.trust.CrlPolicy;
 import de.arbeitsagentur.keycloak.oid4vp.trust.IssuerTrustAnchors;
 import de.arbeitsagentur.keycloak.oid4vp.trust.ResolvedTrust;
 import de.arbeitsagentur.keycloak.oid4vp.trust.TestCertificates;
@@ -68,6 +69,8 @@ import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.keycloak.VCFormat;
 import org.keycloak.common.crypto.CryptoIntegration;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.KeycloakSessionTask;
 
 class SdJwtVerifierTest {
 
@@ -449,6 +452,37 @@ class SdJwtVerifierTest {
     }
 
     @Test
+    void verify_x5cChainWithRevokedLeaf_throws() throws Exception {
+        KeyPair caKeys = TestCertificates.generateKeyPair();
+        KeyPair issuerKeys = TestCertificates.generateKeyPair();
+        X509Certificate ca = TestCertificates.issue(caKeys, caKeys, "CN=Test CA", "CN=Test CA", true);
+        X509Certificate issuerCert = TestCertificates.issue(
+                issuerKeys, caKeys, "CN=Test Issuer", "CN=Test CA", false, List.of("https://ca.example/ca.crl"));
+        byte[] crl = TestCertificates.crl(caKeys, "CN=Test CA", Instant.now().plusSeconds(3600), issuerCert);
+        CrlVerifier crlVerifier = new CrlVerifier(null) {
+            @Override
+            byte[] fetchCrl(KeycloakSession session, String url) {
+                return crl;
+            }
+
+            @Override
+            void runInBackground(KeycloakSessionTask task, Runnable done) {
+                task.run(null);
+                done.run();
+            }
+        };
+        ECKey issuerKey = new ECKey.Builder(Curve.P_256, (ECPublicKey) issuerKeys.getPublic())
+                .privateKey(issuerKeys.getPrivate())
+                .build();
+        String sdJwt = buildSignedJwtWithKey(Map.of("iss", ISSUER, "vct", "PID"), issuerKey, List.of(issuerCert)) + "~";
+
+        assertThatThrownBy(() ->
+                        new SdJwtVerifier(60, 300, null, false, crlVerifier).verify(sdJwt, null, null, anchorsOnly(ca)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("revoked");
+    }
+
+    @Test
     void verify_x5cChainAnchoredAtIssuingCa_succeeds() throws Exception {
         // ETSI trust lists commonly list the issuing CA, so that CA alone anchors the chain.
         KeyPair rootKeys = TestCertificates.generateKeyPair();
@@ -593,7 +627,7 @@ class SdJwtVerifierTest {
 
     private static ResolvedTrust anchorsOnly(X509Certificate caCert) {
         return new ResolvedTrust(
-                List.of(new IssuerTrustAnchors(Set.of(caCert), List.of())),
+                List.of(new IssuerTrustAnchors(Set.of(caCert), List.of(), CrlPolicy.DEFAULT)),
                 List.of(),
                 List.of(),
                 List.of(),
@@ -639,7 +673,8 @@ class SdJwtVerifierTest {
                                 "CN=CA",
                                 "CN=CA",
                                 true)),
-                        List.of())),
+                        List.of(),
+                        CrlPolicy.DEFAULT)),
                 List.of(),
                 List.of(),
                 List.of(),
