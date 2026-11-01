@@ -59,6 +59,7 @@ public class VpTokenProcessor implements VpTokenVerifier {
     private final StatusListVerifier statusListVerifier;
     private final ObjectMapper objectMapper;
     private final Supplier<CredentialTrustPlan> trustPlanSupplier;
+    private final KeycloakSession session;
 
     public record Config(
             KeycloakSession session,
@@ -90,6 +91,7 @@ public class VpTokenProcessor implements VpTokenVerifier {
                 config.requireIssuerSanMatch());
         this.mdocVerifier = new MdocVerifier(config.clockSkewSeconds());
         this.trustPlanSupplier = config.trustPlanSupplier();
+        this.session = config.session();
         this.statusListVerifier =
                 new StatusListVerifier(config.session(), config.statusListMaxCacheTtl(), config.clockSkewSeconds());
         this.objectMapper = objectMapper;
@@ -105,6 +107,7 @@ public class VpTokenProcessor implements VpTokenVerifier {
         this.mdocVerifier = new MdocVerifier(Oid4vpIdentityProviderConfig.DEFAULT_CLOCK_SKEW_SECONDS);
         this.statusListVerifier = statusListVerifier;
         this.trustPlanSupplier = trustPlanSupplier;
+        this.session = null;
         this.objectMapper = objectMapper;
     }
 
@@ -192,6 +195,10 @@ public class VpTokenProcessor implements VpTokenVerifier {
                 trust.issuerTrustAnchors().size(),
                 trust.directIssuerCertificates().size(),
                 trust.trustedIssuerKeys().size());
+        if (!trust.hasIssuerTrust() && TrustListProvider.unavailableIn(session)) {
+            throw new TrustMaterialUnavailableException(
+                    "No trust material is available for credential '" + credentialId + "'");
+        }
 
         try {
             if (sdJwtVerifier.isSdJwt(credential)) {

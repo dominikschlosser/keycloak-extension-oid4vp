@@ -25,6 +25,7 @@ import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import java.io.IOException;
 import java.math.BigInteger;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -36,6 +37,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayDeque;
 import java.util.Base64;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.security.auth.x500.X500Principal;
@@ -100,8 +102,8 @@ class TrustListProviderTest {
 
     @Test
     void parseTrustListJwt_withNextUpdateAsEtsiWritesIt_usesNextUpdateAsExpiry() throws Exception {
-        // ETSI TS 119 602 V1.1.1 clause 6.1.3 prescribes this date-time form: UTC, four-digit year
-        // down to the second, no decimal fraction, "Z".
+        // ETSI TS 119 602 V1.1.1 clause 6.1.3 prescribes this date-time form: UTC to the second with a
+        // four-digit year, no decimal fraction and a trailing "Z".
         String jwt = buildSignedJwt(new JWTClaimsSet.Builder()
                 .claim("ListAndSchemeInformation", Map.of("NextUpdate", "2035-01-02T03:04:05Z"))
                 .claim("TrustedEntitiesList", List.of())
@@ -278,7 +280,9 @@ class TrustListProviderTest {
         X509Certificate issuanceCert = generateTestCert(true);
         X509Certificate revocationCert = generateTestCert(false);
         String jwt = buildSignedJwt(new JWTClaimsSet.Builder()
-                .expirationTime(Date.from(Instant.now().plusSeconds(600)))
+                .claim(
+                        "ListAndSchemeInformation",
+                        Map.of("NextUpdate", Instant.now().plusSeconds(600).toString()))
                 .claim(
                         "TrustedEntitiesList",
                         trustListClaims(
@@ -299,7 +303,6 @@ class TrustListProviderTest {
         void fetchFailure_withRecentStaleEntry_returnsStaleCertificates() throws Exception {
             X509Certificate cert = generateTestCert(true);
 
-            // The cached list expired 10 seconds ago and was fetched 30 seconds ago.
             TrustListProvider provider = new TrustListProvider(null, TEST_URL, null, null, null);
             TrustListProvider.seedExpiredCache(
                     provider,
@@ -315,7 +318,6 @@ class TrustListProviderTest {
         void fetchFailure_withStaleEntryBeyondMaxAge_returnsEmpty() throws Exception {
             X509Certificate cert = generateTestCert(true);
 
-            // The cached list was fetched 2 hours ago, beyond the one hour it may be served stale.
             TrustListProvider provider = new TrustListProvider(null, TEST_URL, null, Duration.ofHours(1), null);
             TrustListProvider.seedExpiredCache(
                     provider,
@@ -325,6 +327,49 @@ class TrustListProviderTest {
 
             List<X509Certificate> result = provider.getTrustedCertificates();
             assertThat(result).isEmpty();
+        }
+
+        @Test
+        void fetchFailure_beforeNextUpdate_keepsTheCopyPastTheCacheTtl() throws Exception {
+            X509Certificate cert = generateTestCert(true);
+            TrustListProvider provider = new TrustListProvider(null, TEST_URL, null, Duration.ZERO, null);
+            TrustListProvider.seedExpiredCache(
+                    provider,
+                    List.of(cert),
+                    Instant.now().minusSeconds(10),
+                    Instant.now().minusSeconds(5),
+                    Instant.now().plusSeconds(3600));
+
+            assertThat(provider.getTrustedCertificates()).containsExactly(cert);
+        }
+
+        @Test
+        void failedRefreshWithAStaleCopyPausesTheDownloads() throws Exception {
+            X509Certificate cert = generateTestCert(true);
+            StubTrustListProvider provider =
+                    new StubTrustListProvider(TEST_URL, List.of(new IOException("down"), new IOException("down")));
+            TrustListProvider.seedExpiredCache(
+                    provider,
+                    List.of(cert),
+                    Instant.now().minusSeconds(10),
+                    Instant.now().minusSeconds(5),
+                    Instant.now().plusSeconds(3600));
+
+            assertThat(provider.getTrustedCertificates()).containsExactly(cert);
+            assertThat(provider.getTrustedCertificates()).containsExactly(cert);
+
+            assertThat(provider.responses).hasSize(1);
+        }
+
+        @Test
+        void failedDownloadWithoutACopyIsRetriedByTheNextLogin() throws Exception {
+            StubTrustListProvider provider =
+                    new StubTrustListProvider(TEST_URL, List.of(new IOException("down"), new IOException("down")));
+
+            assertThat(provider.getTrustedCertificates()).isEmpty();
+            assertThat(provider.getTrustedCertificates()).isEmpty();
+
+            assertThat(provider.responses).isEmpty();
         }
 
         @Test
@@ -346,7 +391,6 @@ class TrustListProviderTest {
         void fetchFailure_withStaleEntryWithinCustomMaxAge_returnsStaleCertificates() throws Exception {
             X509Certificate cert = generateTestCert(true);
 
-            // The cached list was fetched 5 minutes ago, within the ten minutes it may be served stale.
             TrustListProvider provider = new TrustListProvider(null, TEST_URL, null, Duration.ofMinutes(10), null);
             TrustListProvider.seedExpiredCache(
                     provider,
@@ -378,35 +422,90 @@ class TrustListProviderTest {
         private static final String TEST_URL = "https://no-exp.example.com/tl.jwt";
 
         @Test
-        void trustListWithoutNextUpdate_isNotCachedOrReusableAsStale() throws Exception {
-            X509Certificate cert = generateTestCert(true);
-            String jwtWithoutExp = buildSignedJwt(new JWTClaimsSet.Builder()
-                    .claim("TrustedEntitiesList", trustListClaims(cert))
-                    .build());
-            StubTrustListProvider provider =
-                    new StubTrustListProvider(TEST_URL, List.of(jwtWithoutExp, new IllegalStateException("boom")));
+        void closedList_trustsNothing() throws Exception {
+            StubTrustListProvider provider = new StubTrustListProvider(TEST_URL, List.of(closedList()));
 
-            assertThat(provider.getTrustedCertificates()).containsExactly(cert);
             assertThat(provider.getTrustedCertificates()).isEmpty();
         }
 
         @Test
-        void trustListCachesUntilHttpCacheExpiryWhenEarlierThanNextUpdate() throws Exception {
+        void closedList_dropsTheCachedCopy() throws Exception {
             X509Certificate cert = generateTestCert(true);
-            Instant nextUpdate = Instant.now().plusSeconds(600);
+            StubTrustListProvider provider =
+                    new StubTrustListProvider(TEST_URL, List.of(closedList(), new IOException("down")));
+            TrustListProvider.seedExpiredCache(
+                    provider,
+                    List.of(cert),
+                    Instant.now().minusSeconds(10),
+                    Instant.now().minusSeconds(30),
+                    Instant.now().plusSeconds(600));
+
+            assertThat(provider.getTrustedCertificates()).isEmpty();
+            assertThat(provider.getTrustedCertificates()).isEmpty();
+        }
+
+        @Test
+        void withdrawnService_addsNoCertificates() throws Exception {
+            X509Certificate notified = generateTestCert(true);
+            X509Certificate withdrawn = generateTestCert(true);
+            X509Certificate withoutStatus = generateTestCert(true);
             String jwt = buildSignedJwt(new JWTClaimsSet.Builder()
-                    .claim("ListAndSchemeInformation", Map.of("NextUpdate", nextUpdate.toString()))
-                    .claim("TrustedEntitiesList", trustListClaims(cert))
+                    .claim(
+                            "ListAndSchemeInformation",
+                            Map.of("NextUpdate", Instant.now().plusSeconds(600).toString()))
+                    .claim(
+                            "TrustedEntitiesList",
+                            trustListClaims(
+                                    serviceClaim(
+                                            PID_ISSUANCE_SERVICE_TYPE,
+                                            "http://uri.etsi.org/19602/PubEAAProvidersList/SvcStatus/notified",
+                                            notified),
+                                    serviceClaim(
+                                            PID_ISSUANCE_SERVICE_TYPE,
+                                            "http://uri.etsi.org/19602/PubEAAProvidersList/SvcStatus/withdrawn",
+                                            withdrawn),
+                                    serviceClaim(PID_ISSUANCE_SERVICE_TYPE, withoutStatus)))
                     .build());
+
+            assertThat(TrustListProvider.parseTrustListJwt(jwt).certificates())
+                    .containsExactly(notified, withoutStatus);
+        }
+
+        private String closedList() throws Exception {
+            return buildSignedJwt(new JWTClaimsSet.Builder()
+                    .claim("TrustedEntitiesList", trustListClaims(generateTestCert(true)))
+                    .build());
+        }
+
+        @Test
+        void trustListIsCachedUntilNextUpdate() throws Exception {
+            X509Certificate cert = generateTestCert(true);
             StubTrustListProvider provider = new StubTrustListProvider(
-                    TEST_URL,
-                    List.of(
-                            new TrustListProvider.FetchedTrustList(
-                                    jwt, Instant.now().plusSeconds(60)),
-                            new IllegalStateException("boom")));
+                    TEST_URL, List.of(jwtWithNextUpdate(cert), new IllegalStateException("boom")));
 
             assertThat(provider.getTrustedCertificates()).containsExactly(cert);
             assertThat(provider.getTrustedCertificates()).containsExactly(cert);
+            assertThat(provider.responses).hasSize(1);
+        }
+
+        @Test
+        void maxCacheTtl_capsNextUpdate() throws Exception {
+            X509Certificate cert = generateTestCert(true);
+            String jwt = jwtWithNextUpdate(cert);
+            StubTrustListProvider provider = new StubTrustListProvider(TEST_URL, Duration.ZERO, List.of(jwt, jwt));
+
+            assertThat(provider.getTrustedCertificates()).containsExactly(cert);
+            assertThat(provider.getTrustedCertificates()).containsExactly(cert);
+            assertThat(provider.responses).isEmpty();
+        }
+
+        private String jwtWithNextUpdate(X509Certificate cert) throws Exception {
+            return buildSignedJwt(new JWTClaimsSet.Builder()
+                    .claim(
+                            "ListAndSchemeInformation",
+                            Map.of("NextUpdate", Instant.now().plusSeconds(600).toString()))
+                    .claim("TrustedEntitiesList", trustListClaims(cert))
+                    .build());
         }
 
         @Test
@@ -443,6 +542,20 @@ class TrustListProviderTest {
 
             assertThat(unsignedProvider.getTrustedCertificates()).containsExactly(cachedCert);
             assertThat(signedProvider.getTrustedCertificates()).isEmpty();
+        }
+
+        @Test
+        void cacheKey_keepsProvidersSharingATrustListApart() throws Exception {
+            X509Certificate cachedCert = generateTestCert(true);
+
+            TrustListProvider owner = new TrustListProvider(null, "provider-a", TEST_URL, null, null, null);
+            TrustListProvider other = new TrustListProvider(null, "provider-b", TEST_URL, null, null, null);
+
+            TrustListProvider.seedExpiredCache(
+                    owner, List.of(cachedCert), Instant.now().plusSeconds(300), Instant.now());
+
+            assertThat(owner.getTrustedCertificates()).containsExactly(cachedCert);
+            assertThat(other.getTrustedCertificates()).isEmpty();
         }
 
         @Test
@@ -604,22 +717,31 @@ class TrustListProviderTest {
 
     private static Map<String, Object> serviceClaim(String serviceTypeIdentifier, X509Certificate cert)
             throws Exception {
-        return Map.of(
-                "ServiceInformation",
+        return serviceClaim(serviceTypeIdentifier, null, cert);
+    }
+
+    private static Map<String, Object> serviceClaim(
+            String serviceTypeIdentifier, String serviceStatus, X509Certificate cert) throws Exception {
+        Map<String, Object> information = new HashMap<>();
+        information.put("ServiceTypeIdentifier", serviceTypeIdentifier);
+        information.put("ServiceStatus", serviceStatus);
+        information.put(
+                "ServiceDigitalIdentity",
                 Map.of(
-                        "ServiceTypeIdentifier",
-                        serviceTypeIdentifier,
-                        "ServiceDigitalIdentity",
-                        Map.of(
-                                "X509Certificates",
-                                List.of(Map.of("val", Base64.getMimeEncoder().encodeToString(cert.getEncoded()))))));
+                        "X509Certificates",
+                        List.of(Map.of("val", Base64.getMimeEncoder().encodeToString(cert.getEncoded())))));
+        return Map.of("ServiceInformation", information);
     }
 
     private static final class StubTrustListProvider extends TrustListProvider {
         private final ArrayDeque<Object> responses;
 
         private StubTrustListProvider(String trustListUrl, List<Object> responses) {
-            super(null, trustListUrl, null, null, null);
+            this(trustListUrl, null, responses);
+        }
+
+        private StubTrustListProvider(String trustListUrl, Duration maxCacheTtl, List<Object> responses) {
+            super(null, trustListUrl, maxCacheTtl, null, null);
             this.responses = new ArrayDeque<>(responses);
         }
 
@@ -627,15 +749,12 @@ class TrustListProviderTest {
         void verifySignature(String jwt) {}
 
         @Override
-        protected FetchedTrustList fetchTrustListJwt() throws Exception {
+        protected String fetchTrustListJwt() throws Exception {
             Object next = responses.removeFirst();
             if (next instanceof Exception exception) {
                 throw exception;
             }
-            if (next instanceof FetchedTrustList fetchedTrustList) {
-                return fetchedTrustList;
-            }
-            return new FetchedTrustList(next.toString(), null);
+            return next.toString();
         }
     }
 }
