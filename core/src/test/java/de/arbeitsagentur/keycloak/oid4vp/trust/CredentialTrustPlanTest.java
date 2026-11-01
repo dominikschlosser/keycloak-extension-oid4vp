@@ -32,6 +32,7 @@ import org.keycloak.models.IdentityProviderModel;
 class CredentialTrustPlanTest {
 
     private static final String PID = "urn:eudi:pid:1";
+    private static final String MDL = "urn:eudi:mdl:1";
 
     /**
      * Building the authorization request must not depend on the trust material being reachable. A
@@ -107,7 +108,6 @@ class CredentialTrustPlanTest {
         assertThat(plan.serves("urn:eudi:pid:de:1")).isFalse();
     }
 
-    // Advertises its trust domain but cannot serve the material behind it.
     private static class UnreachableTrustMaterialProvider
             implements Oid4vpTrustMaterialIdentityProvider<IdentityProviderModel> {
 
